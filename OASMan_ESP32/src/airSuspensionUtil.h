@@ -45,6 +45,7 @@ bool isKeepAliveTimerExpired();
 namespace PressureSensorCalibration
 {
     void learnPressureSensorsRoutine();
+    void logPressureSensorValuesRoutine();
 }
 
 void trainAIModels();

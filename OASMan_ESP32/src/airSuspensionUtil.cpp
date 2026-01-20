@@ -3,7 +3,7 @@
 
 #pragma region variables
 
-InputType *pressureInputs[5];
+InputType *pressureInputs[5]; // populated with all 4 of our pressure sensors in main
 Manifold *manifold;
 Compressor *compressor;
 RfReceiver *rfReceiver;
@@ -375,6 +375,27 @@ void upAllBags(int time)
     manifold->get(SOLENOID_INDEX::REAR_DRIVER_IN)->close();
 }
 
+void drainWholeSystem(int time)
+{
+    manifold->get(SOLENOID_INDEX::FRONT_PASSENGER_OUT)->open();
+    manifold->get(SOLENOID_INDEX::REAR_PASSENGER_OUT)->open();
+    manifold->get(SOLENOID_INDEX::FRONT_DRIVER_OUT)->open();
+    manifold->get(SOLENOID_INDEX::REAR_DRIVER_OUT)->open();
+    manifold->get(SOLENOID_INDEX::FRONT_PASSENGER_IN)->open();
+    manifold->get(SOLENOID_INDEX::REAR_PASSENGER_IN)->open();
+    manifold->get(SOLENOID_INDEX::FRONT_DRIVER_IN)->open();
+    manifold->get(SOLENOID_INDEX::REAR_DRIVER_IN)->open();
+    delay(time);
+    manifold->get(SOLENOID_INDEX::FRONT_PASSENGER_OUT)->close();
+    manifold->get(SOLENOID_INDEX::REAR_PASSENGER_OUT)->close();
+    manifold->get(SOLENOID_INDEX::FRONT_DRIVER_OUT)->close();
+    manifold->get(SOLENOID_INDEX::REAR_DRIVER_OUT)->close();
+    manifold->get(SOLENOID_INDEX::FRONT_PASSENGER_IN)->close();
+    manifold->get(SOLENOID_INDEX::REAR_PASSENGER_IN)->close();
+    manifold->get(SOLENOID_INDEX::FRONT_DRIVER_IN)->close();
+    manifold->get(SOLENOID_INDEX::REAR_DRIVER_IN)->close();
+}
+
 double averageBags()
 {
     getWheel(WHEEL_FRONT_PASSENGER)->readInputs();
@@ -497,6 +518,58 @@ namespace PressureSensorCalibration
         setpressureInputRearPassenger(IDX_REAR_PASSENGER);
         setpressureInputFrontDriver(IDX_FRONT_DRIVER);
         setpressureInputRearDriver(IDX_REAR_DRIVER);
+
+        delay(500);
+        ESP.restart(); // reboot this bih
+    }
+
+
+    void logPressureSensorValuesRoutine()
+    {
+        // STEP 1: Drain the entire system
+        drainWholeSystem(20 * 1000);
+
+        delay(500); // wait for pressures to stabilize
+
+        // STEP 2: Open all valves between bags and tank, so that it will flow between them
+        manifold->get(SOLENOID_INDEX::FRONT_PASSENGER_OUT)->open();
+        manifold->get(SOLENOID_INDEX::REAR_PASSENGER_OUT)->open();
+        manifold->get(SOLENOID_INDEX::FRONT_DRIVER_OUT)->open();
+        manifold->get(SOLENOID_INDEX::REAR_DRIVER_OUT)->open();
+
+        // sleep 5 seconds just to make sure all pressures stabilize between tank and bag if any is left
+        delay(5000);
+
+        // STEP 3: Start logging pressures
+        float pressures[5];
+        getPinPressures(pressures);
+
+        // STEP 2: Fill up tank with compressor until we get 100 as our reading or for 30 seconds
+        // first check if we already have one pressure that is full (aka tank is already full)
+        // log values as we loop through it up to 100
+        if (!isAnyBagMaxxed(pressures))
+        {
+            compressor->getOverrideSolenoid()->open();
+            unsigned long startTime = millis();
+            unsigned long now = millis();
+            while (now < startTime + 30 * 1000)
+            {
+                getPinPressures(pressures);
+                append5vReadingLog(now - startTime, pressures);
+                // check tank pressure just in case it's already full
+                if (isAnyBagMaxxed(pressures))
+                {
+                    // turn off compressor if any are over 100
+                    compressor->getOverrideSolenoid()->close();
+                    break;
+                }
+                delay(50);
+                now = millis();
+            }
+            compressor->getOverrideSolenoid()->close();
+        }
+
+        
 
         delay(500);
         ESP.restart(); // reboot this bih

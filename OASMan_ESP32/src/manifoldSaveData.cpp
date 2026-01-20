@@ -33,6 +33,55 @@ const char *getLogFileName(SOLENOID_AI_INDEX index)
     }
 }
 
+struct TankSensorReadingStruct {
+    uint32_t timeMS;
+    float tank;
+    float a;
+    float b;
+    float c;
+    float d;
+    void print()
+    {
+        // Serial.printf("{0x%X, 0x%X, 0x%X, 0x%X}", start_pressure, goal_pressure, tank_pressure, timeMS);
+        Serial.print("{");
+        Serial.print(timeMS);
+        Serial.print(", ");
+        Serial.print(tank);
+        Serial.print(", ");
+        Serial.print(a);
+        Serial.print(", ");
+        Serial.print(b);
+        Serial.print(", ");
+        Serial.print(c);
+        Serial.print(", ");
+        Serial.print(d);
+        Serial.print("}");
+    }
+};
+
+void printSavedDataFromSensorReadings() {
+    Serial.print("/tanksensor.dat");
+    Serial.println(":");
+
+    File file = SPIFFS.open("/tanksensor.dat", "r");
+    if (!file) {
+        Serial.println("Failed to open file for reading");
+    } else {
+        int i = 0;
+        TankSensorReadingStruct myStruct;
+        while (file.available()) {
+            file.read((byte *)&myStruct, sizeof(myStruct));
+            i++;
+            myStruct.print();
+            Serial.print(", ");
+        }
+        file.close(); // Close the file
+    }
+
+    
+    Serial.println();
+}
+
 void initDataFile(SOLENOID_AI_INDEX index)
 {
     Serial.print(getLogFileName(index));
@@ -104,6 +153,13 @@ void loadAILearnedDataPreferences()
         initDataFile((SOLENOID_AI_INDEX)i);
     }
     Serial.println("END IMPORTANT DATA FOR PRO");
+    for (int i = 0; i < 10; i++)
+        Serial.println("");
+
+
+    Serial.println("BEGIN ADC GRAPH");
+    printSavedDataFromSensorReadings();
+    Serial.println("END ADC GRAPH");
     for (int i = 0; i < 10; i++)
         Serial.println("");
 }
@@ -307,6 +363,18 @@ void appendPressureDataToFile(SOLENOID_AI_INDEX aiIndex, uint8_t start_pressure,
     }
 
     updateAIPercentage();
+}
+
+
+void append5vReadingLog(uint32_t timeMS,
+    float pressures[5])
+{
+    TankSensorReadingStruct s = {timeMS, pressures[0], pressures[1], pressures[2], pressures[3], pressures[4]};
+    writeBytes("/tanksensor.dat", &s, sizeof(TankSensorReadingStruct), "a");
+}
+
+void delete5vReadingLog() {
+    deleteFile("/tanksensor.dat");
 }
 
 AIModelPreference *getAIModel(SOLENOID_AI_INDEX aiIndex)

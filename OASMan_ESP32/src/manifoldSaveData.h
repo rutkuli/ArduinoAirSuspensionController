@@ -123,6 +123,9 @@ int getLearnDataLength(SOLENOID_AI_INDEX aiIndex);
 void clearPressureData();
 
 void appendPressureDataToFile(SOLENOID_AI_INDEX aiIndex, uint8_t start_pressure, uint8_t goal_pressure, uint16_t tank_pressure, uint32_t timeMS);
+void append5vReadingLog(uint32_t timeMS,
+    float pressures[5]);
+void delete5vReadingLog();
 
 AIModelPreference *getAIModel(SOLENOID_AI_INDEX aiIndex);
 

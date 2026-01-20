@@ -82,7 +82,8 @@ void setup()
     if (getlearnPressureSensors())
     {
         setlearnPressureSensors(false);
-        PressureSensorCalibration::learnPressureSensorsRoutine();
+        // PressureSensorCalibration::learnPressureSensorsRoutine();
+        PressureSensorCalibration::logPressureSensorValuesRoutine();
     }
 
     accessoryWireSetup();

@@ -671,6 +671,7 @@ void runReceivedPacket(hci_con_handle_t con_handle, BTOasPacket *packet)
         setsafetyMode(((SafetyModePacket *)packet)->getBoolean());
         break;
     case BTOasIdentifier::DETECTPRESSURESENSORS:
+        delete5vReadingLog();
         setlearnPressureSensors(true);
         setinternalReboot(true);
         break;

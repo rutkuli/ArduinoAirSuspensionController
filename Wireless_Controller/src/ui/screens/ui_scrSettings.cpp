@@ -373,7 +373,7 @@ void ScrSettings::init()
     this->ui_safetymode = new Option(basic_settings_page, OptionType::ON_OFF, "Safety Mode", {.STRING = test}, safety_mode_handler);
 
 #if ENABLE_DETECT_PRESSURE_SENSORS_BUTTON
-    new Option(basic_settings_page, OptionType::BUTTON, "Detect Pressure Sensors", {.STRING = test}, [](void *data)
+    new Option(basic_settings_page, OptionType::BUTTON, "Calibrate Pressure Sensors", {.STRING = test}, [](void *data)
     {
         currentScr->showMsgBox("Detect Pressure Sensors?",
             "WARNING: YOUR CAR WILL BE AIRED OUT!!!! This routine will auto learn which pressure sensors go to which wheels.",
