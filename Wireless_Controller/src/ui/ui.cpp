@@ -10,7 +10,359 @@
 
 LV_IMG_DECLARE(oasman_splash);
 
+// Constants
+static constexpr int NUM_TABS = 3;
+static constexpr uint32_t NAVBAR_ACTIVE_TEXT_COLOR = 0xFFFFFF;
+static constexpr uint32_t NAVBAR_INACTIVE_TEXT_COLOR = 0x64748B;
+static constexpr uint32_t NAVBAR_BORDER_COLOR = 0x1E293B;
+static constexpr int NAVBAR_INDICATOR_WIDTH = 40;
+static constexpr int NAVBAR_INDICATOR_HEIGHT = 3;
+static constexpr int NAVBAR_INDICATOR_ANIM_TIME = 200;
+static constexpr int NAVBAR_INDICATOR_POS_TOLERANCE = 1;
+static constexpr int NAVBAR_INDICATOR_Y_OFFSET = 6;
+static constexpr int NAVBAR_BUTTON_PAD_ROW = 4;
+
+static const char* NAVBAR_ICONS[NUM_TABS] = {
+    LV_SYMBOL_HOME,
+    LV_SYMBOL_LIST,
+    LV_SYMBOL_SETTINGS
+};
+
+static const char* TAB_LABELS[NUM_TABS] = {
+    "Home",
+    "Presets",
+    "Settings"
+};
+
 SCREEN currentScreen = SCREEN_NONE;
+
+// Screen objects - stored directly in g_tabs
+static ScrHome scrHome(true, true, NAV_HOME);
+static ScrPresets scrPresets(true, true, NAV_PRESETS);
+static ScrSettings scrSettings(false, false, NAV_SETTINGS);
+
+// Tabview-based navigation (swipe between screens)
+static lv_obj_t *g_main_screen = nullptr;
+static lv_obj_t *g_tabview = nullptr;
+static lv_obj_t *g_tab_objs[NUM_TABS] = {nullptr, nullptr, nullptr}; // LVGL tab objects: 0=Home, 1=Presets, 2=Settings
+Scr *g_tabs[NUM_TABS] = {&scrHome, &scrPresets, &scrSettings}; // Screen objects: 0=Home, 1=Presets, 2=Settings
+
+// Global fixed navbar (not per-screen, stays static)
+static lv_obj_t *g_navbar_container = nullptr;
+static lv_obj_t *g_navbar_btns[NUM_TABS] = {nullptr, nullptr, nullptr};
+static lv_obj_t *g_navbar_icons[NUM_TABS] = {nullptr, nullptr, nullptr};
+static lv_obj_t *g_navbar_labels[NUM_TABS] = {nullptr, nullptr, nullptr};
+static lv_obj_t *g_navbar_indicator = nullptr;
+
+// Conversion functions
+static inline uint32_t screenToTabIndex(SCREEN s)
+{
+    // SCREEN_NONE and SCREEN_HOME both map to 0
+    if (s == SCREEN_PRESETS) return 1;
+    if (s == SCREEN_SETTINGS) return 2;
+    return 0; // SCREEN_NONE, SCREEN_HOME, or default
+}
+
+static inline SCREEN tabIndexToScreen(uint32_t idx)
+{
+    static const SCREEN screenMap[NUM_TABS] = {SCREEN_HOME, SCREEN_PRESETS, SCREEN_SETTINGS};
+    return (idx < NUM_TABS) ? screenMap[idx] : SCREEN_HOME;
+}
+
+static inline Scr *screenToScr(SCREEN s)
+{
+    uint32_t idx = screenToTabIndex(s);
+    return (idx < NUM_TABS) ? g_tabs[idx] : g_tabs[0];
+}
+
+// Forward declarations
+static void updateGlobalNavbarSelection(uint32_t active_tab_idx);
+static bool canChangeScreen();
+static void syncAlertState();
+static void initializeTabObjects(int w, int h, int navbarHeight);
+static void mountScreens();
+static void resetNavbarPointers();
+
+// Flag to prevent recursive calls when programmatically changing tabs
+static bool g_programmatic_tab_change = false;
+
+// Flag to prevent duplicate navbar updates when clicking buttons
+static bool g_navbar_just_updated = false;
+
+// Helper functions
+static bool canChangeScreen()
+{
+    return isKeyboardHidden() && (!currentScr || !currentScr->isMsgBoxDisplayed());
+}
+
+static void syncAlertState()
+{
+    if (currentScr && currentScr->alert) {
+        currentScr->alert->syncFromGlobal();
+    }
+}
+
+static void initializeTabObjects(int w, int h, int navbarHeight)
+{
+    for (int i = 0; i < NUM_TABS; i++) {
+        g_tab_objs[i] = lv_tabview_add_tab(g_tabview, TAB_LABELS[i]);
+        if (g_tab_objs[i]) {
+            lv_obj_remove_style_all(g_tab_objs[i]);
+            lv_obj_set_style_pad_all(g_tab_objs[i], 0, 0);
+            lv_obj_set_size(g_tab_objs[i], w, h - navbarHeight);
+            lv_obj_remove_flag(g_tab_objs[i], LV_OBJ_FLAG_SCROLLABLE);
+        }
+    }
+}
+
+static void mountScreens()
+{
+    for (int i = 0; i < NUM_TABS; i++) {
+        if (g_tabs[i] && g_tab_objs[i]) {
+            g_tabs[i]->scr = g_tab_objs[i];
+            g_tabs[i]->init();
+            screens[i] = g_tabs[i];
+        }
+    }
+}
+
+static void resetNavbarPointers()
+{
+    g_navbar_container = nullptr;
+    g_navbar_indicator = nullptr;
+    for (int i = 0; i < NUM_TABS; i++) {
+        g_navbar_btns[i] = nullptr;
+        g_navbar_icons[i] = nullptr;
+        g_navbar_labels[i] = nullptr;
+    }
+}
+
+// Static function for animation callback (reduces stack usage vs lambda)
+static void anim_indicator_exec_cb(void* obj, int32_t v)
+{
+    lv_obj_set_x((lv_obj_t*)obj, v);
+}
+
+// Global navbar click handler - switches tabs
+static void global_navbar_click_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    
+    uint32_t tab_idx = (uint32_t)(intptr_t)lv_event_get_user_data(e);
+    
+    if (!canChangeScreen()) return;
+    
+    if (g_tabview) {
+        g_navbar_just_updated = true;
+        updateGlobalNavbarSelection(tab_idx);
+        lv_tabview_set_active(g_tabview, tab_idx, LV_ANIM_ON);
+    }
+}
+
+// Update navbar visual state based on active tab
+static void updateGlobalNavbarSelection(uint32_t active_tab_idx)
+{
+    if (!g_navbar_container) return;
+
+    const int screenWidth = getScreenWidth();
+    const int btnWidth = screenWidth / NUM_TABS;
+    const uint32_t accentColor = THEME_COLOR_LIGHT;
+
+    // Animated underline indicator
+    const int indicatorWidth = scaledX(NAVBAR_INDICATOR_WIDTH);
+    int indicatorX = (btnWidth / 2) - (indicatorWidth / 2) + (active_tab_idx * btnWidth);
+    
+    if (g_navbar_indicator) {
+        int currentX = lv_obj_get_x(g_navbar_indicator);
+        
+        if (abs(currentX - indicatorX) <= NAVBAR_INDICATOR_POS_TOLERANCE) {
+            lv_obj_set_x(g_navbar_indicator, indicatorX);
+        } else {
+            lv_anim_del(g_navbar_indicator, anim_indicator_exec_cb);
+            
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, g_navbar_indicator);
+            lv_anim_set_values(&a, currentX, indicatorX);
+            lv_anim_set_time(&a, NAVBAR_INDICATOR_ANIM_TIME);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+            lv_anim_set_exec_cb(&a, anim_indicator_exec_cb);
+            lv_anim_start(&a);
+        }
+    }
+
+    // Update colors
+    for (int i = 0; i < NUM_TABS; i++) {
+        bool isActive = (i == active_tab_idx);
+        uint32_t iconColor = isActive ? accentColor : NAVBAR_INACTIVE_TEXT_COLOR;
+        uint32_t labelColor = isActive ? NAVBAR_ACTIVE_TEXT_COLOR : NAVBAR_INACTIVE_TEXT_COLOR;
+        
+        if (g_navbar_icons[i]) {
+            lv_obj_set_style_text_color(g_navbar_icons[i], lv_color_hex(iconColor), 0);
+        }
+        if (g_navbar_labels[i]) {
+            lv_obj_set_style_text_color(g_navbar_labels[i], lv_color_hex(labelColor), 0);
+        }
+    }
+}
+
+// Create global fixed navbar on main screen
+static void createGlobalNavbar()
+{
+    const int navbarHeight = getNavbarHeight();
+    const int screenWidth = getScreenWidth();
+    const int btnWidth = screenWidth / NUM_TABS;
+    const uint32_t accentColor = THEME_COLOR_LIGHT;
+
+    // Main navbar container
+    g_navbar_container = lv_obj_create(g_main_screen);
+    lv_obj_remove_style_all(g_navbar_container);
+    lv_obj_set_size(g_navbar_container, screenWidth, navbarHeight);
+    lv_obj_set_align(g_navbar_container, LV_ALIGN_BOTTOM_MID);
+    lv_obj_set_style_bg_color(g_navbar_container, lv_color_hex(GENERIC_GREY_VERY_DARK), 0);
+    lv_obj_set_style_bg_opa(g_navbar_container, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(g_navbar_container, 0, 0);
+    lv_obj_set_style_pad_all(g_navbar_container, 0, 0);
+    lv_obj_remove_flag(g_navbar_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_move_foreground(g_navbar_container);
+
+    // Subtle top border
+    lv_obj_t *topLine = lv_obj_create(g_navbar_container);
+    lv_obj_remove_style_all(topLine);
+    lv_obj_set_size(topLine, screenWidth, 1);
+    lv_obj_set_align(topLine, LV_ALIGN_TOP_MID);
+    lv_obj_set_style_bg_color(topLine, lv_color_hex(NAVBAR_BORDER_COLOR), 0);
+    lv_obj_set_style_bg_opa(topLine, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(topLine, (lv_obj_flag_t)(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+
+    // Sliding underline indicator
+    g_navbar_indicator = lv_obj_create(g_navbar_container);
+    lv_obj_remove_style_all(g_navbar_indicator);
+    const int indicatorWidth = scaledX(NAVBAR_INDICATOR_WIDTH);
+    const int indicatorHeight = scaledY(NAVBAR_INDICATOR_HEIGHT);
+    lv_obj_set_size(g_navbar_indicator, indicatorWidth, indicatorHeight);
+    lv_obj_set_style_bg_color(g_navbar_indicator, lv_color_hex(accentColor), 0);
+    lv_obj_set_style_bg_opa(g_navbar_indicator, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(g_navbar_indicator, scaledY(2), 0);
+    lv_obj_set_style_shadow_color(g_navbar_indicator, lv_color_hex(accentColor), 0);
+    lv_obj_set_style_shadow_width(g_navbar_indicator, scaledX(8), 0);
+    lv_obj_set_style_shadow_opa(g_navbar_indicator, LV_OPA_60, 0);
+    lv_obj_remove_flag(g_navbar_indicator, (lv_obj_flag_t)(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+
+    // Position indicator centered under active item (default to Home/0)
+    int indicatorX = (btnWidth / 2) - (indicatorWidth / 2);
+    lv_obj_set_pos(g_navbar_indicator, indicatorX, navbarHeight - scaledY(NAVBAR_INDICATOR_Y_OFFSET));
+
+    // Create navbar buttons
+    for (int i = 0; i < NUM_TABS; i++) {
+        g_navbar_btns[i] = lv_obj_create(g_navbar_container);
+        lv_obj_remove_style_all(g_navbar_btns[i]);
+        lv_obj_set_size(g_navbar_btns[i], btnWidth, navbarHeight);
+        lv_obj_set_pos(g_navbar_btns[i], i * btnWidth, 0);
+        lv_obj_set_style_bg_opa(g_navbar_btns[i], LV_OPA_TRANSP, 0);
+        lv_obj_remove_flag(g_navbar_btns[i], LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(g_navbar_btns[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_flex_flow(g_navbar_btns[i], LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(g_navbar_btns[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(g_navbar_btns[i], NAVBAR_BUTTON_PAD_ROW, 0);
+        lv_obj_add_event_cb(g_navbar_btns[i], global_navbar_click_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+
+        // Icon
+        g_navbar_icons[i] = lv_label_create(g_navbar_btns[i]);
+        lv_label_set_text(g_navbar_icons[i], NAVBAR_ICONS[i]);
+        lv_obj_set_style_text_font(g_navbar_icons[i], &lv_font_montserrat_16, 0);
+        lv_obj_remove_flag(g_navbar_icons[i], LV_OBJ_FLAG_CLICKABLE);
+
+        // Label
+        g_navbar_labels[i] = lv_label_create(g_navbar_btns[i]);
+        lv_label_set_text(g_navbar_labels[i], TAB_LABELS[i]);
+        lv_obj_set_style_text_font(g_navbar_labels[i], &lv_font_montserrat_10, 0);
+        lv_obj_remove_flag(g_navbar_labels[i], LV_OBJ_FLAG_CLICKABLE);
+
+        // Colors based on active state (default to Home/0 active)
+        bool isActive = (i == 0);
+        uint32_t iconColor = isActive ? accentColor : NAVBAR_INACTIVE_TEXT_COLOR;
+        uint32_t labelColor = isActive ? NAVBAR_ACTIVE_TEXT_COLOR : NAVBAR_INACTIVE_TEXT_COLOR;
+        lv_obj_set_style_text_color(g_navbar_icons[i], lv_color_hex(iconColor), 0);
+        lv_obj_set_style_text_color(g_navbar_labels[i], lv_color_hex(labelColor), 0);
+    }
+}
+
+// Event handlers
+static void tabview_value_changed_cb(lv_event_t *e)
+{
+    (void)e;
+    static uint32_t last_idx = 0;
+
+    if (!g_tabview) return;
+
+    uint32_t idx = lv_tabview_get_tab_active(g_tabview);
+    if (idx == last_idx) return;
+
+    if (g_programmatic_tab_change) {
+        last_idx = idx;
+        return;
+    }
+
+    if (!canChangeScreen()) {
+        lv_tabview_set_active(g_tabview, last_idx, LV_ANIM_OFF);
+        return;
+    }
+
+    last_idx = idx;
+    SCREEN s = tabIndexToScreen(idx);
+    if (currentScreen == s) return;
+
+    currentScreen = s;
+    currentScr = screenToScr(s);
+
+    if (!g_navbar_just_updated) {
+        updateGlobalNavbarSelection(idx);
+    } else {
+        g_navbar_just_updated = false;
+    }
+
+    syncAlertState();
+}
+
+// Initialization functions
+static void buildTabviewUi()
+{
+    const int w = getScreenWidth();
+    const int h = getScreenHeight();
+    const int navbarHeight = getNavbarHeight();
+
+    g_main_screen = lv_obj_create(NULL);
+    lv_obj_remove_flag(g_main_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_screen_load(g_main_screen);
+
+    g_tabview = lv_tabview_create(g_main_screen);
+    lv_obj_set_size(g_tabview, w, h - navbarHeight);
+    lv_obj_set_pos(g_tabview, 0, 0);
+    lv_obj_set_style_pad_all(g_tabview, 0, 0);
+
+    // Hide the built-in tab bar
+    lv_obj_t *tab_bar = lv_tabview_get_tab_bar(g_tabview);
+    if (tab_bar) {
+        lv_obj_add_flag(tab_bar, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_height(tab_bar, 0);
+        lv_obj_clear_flag(tab_bar, LV_OBJ_FLAG_CLICKABLE);
+    }
+
+    lv_obj_t *content = lv_tabview_get_content(g_tabview);
+    if (content) {
+        lv_obj_set_style_pad_all(content, 0, 0);
+        lv_obj_set_size(content, w, h - navbarHeight);
+    }
+
+    initializeTabObjects(w, h, navbarHeight);
+    createGlobalNavbar();
+    mountScreens();
+
+    lv_obj_add_event_cb(g_tabview, tabview_value_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_tabview_set_active(g_tabview, 0, LV_ANIM_OFF);
+    updateGlobalNavbarSelection(0);
+}
 
 void ui_init(void)
 {
@@ -21,95 +373,66 @@ void ui_init(void)
     lv_theme_t *theme = lv_theme_default_init(dispp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED),
                                               false, LV_FONT_DEFAULT);
     lv_display_set_theme(dispp, theme);
-    scrHome.init();
-    scrPresets.init();
-    scrSettings.init();
+    buildTabviewUi();
     changeScreen(SCREEN_HOME);
 
     // Delete the temporary screen that was used during splash/init
-    if (tempScr != NULL && tempScr != scrHome.scr) {
+    if (tempScr != NULL && tempScr != g_main_screen) {
         lv_obj_del(tempScr);
     }
-
-    screens[0] = &scrHome;
-    screens[1] = &scrPresets;
-    screens[2] = &scrSettings;
 }
 
 void ui_reinit(void)
 {
-    // Store current screen to restore after reinit
     SCREEN prevScreen = currentScreen;
 
-    // Create OASMan splash screen
-    set_brightness(0);// turn off brightness to not display gross artifacts while the logo is rendering
-    delay(10); // not sure if this is needed, but just in case
-
+    set_brightness(0);
+    delay(10);
     lv_obj_t *splashScr = applyRotationAndShowSplashScreen();
 
-    // Reset state
     currentScreen = SCREEN_NONE;
     currentScr = nullptr;
 
-    // Clean up each screen (virtual cleanup handles screen-specific objects)
-    scrHome.cleanup();
-    scrPresets.cleanup();
-    scrSettings.cleanup();
+    // Clean up screens
+    for (int i = 0; i < NUM_TABS; i++) {
+        if (g_tabs[i]) {
+            g_tabs[i]->cleanup();
+            g_tabs[i]->scr = nullptr;
+        }
+    }
 
-    // Delete LVGL screen objects
-    if (scrHome.scr) { lv_obj_del(scrHome.scr); scrHome.scr = nullptr; }
-    if (scrPresets.scr) { lv_obj_del(scrPresets.scr); scrPresets.scr = nullptr; }
-    if (scrSettings.scr) { lv_obj_del(scrSettings.scr); scrSettings.scr = nullptr; }
+    // Delete LVGL UI root
+    if (g_main_screen) {
+        lv_obj_del(g_main_screen);
+        g_main_screen = nullptr;
+    }
+    g_tabview = nullptr;
+    for (int i = 0; i < NUM_TABS; i++) {
+        g_tab_objs[i] = nullptr;
+    }
+    resetNavbarPointers();
 
-    // Reinitialize screens
-    scrHome.init();
-    scrPresets.init();
-    scrSettings.init();
-
-    // Update screens array
-    screens[0] = &scrHome;
-    screens[1] = &scrPresets;
-    screens[2] = &scrSettings;
-
-    // Restore to previous screen
+    buildTabviewUi();
     changeScreen(prevScreen);
-
     lv_obj_del(splashScr);
 }
 
 void changeScreen(SCREEN screen)
 {
-    if (currentScreen == screen)
-    {
-        return;
-    }
-
-    // lv_refr_now(lv_disp_get_default());
+    if (currentScreen == screen) return;
 
     currentScreen = screen;
-    switch (screen)
-    {
-    case SCREEN_HOME:
-        lv_screen_load(scrHome.scr);
-        currentScr = &scrHome;
-        break;
-    case SCREEN_PRESETS:
-        lv_screen_load(scrPresets.scr);
-        currentScr = &scrPresets;
-        break;
-    case SCREEN_SETTINGS:
-        lv_screen_load(scrSettings.scr);
-        currentScr = &scrSettings;
-        break;
+    currentScr = screenToScr(screen);
+
+    if (g_tabview) {
+        uint32_t tab_idx = screenToTabIndex(screen);
+        g_programmatic_tab_change = true;
+        lv_tabview_set_active(g_tabview, tab_idx, LV_ANIM_ON);
+        g_programmatic_tab_change = false;
+        updateGlobalNavbarSelection(tab_idx);
     }
 
-    // Sync alert icon state from global dismissed state when changing screens
-    if (currentScr != NULL && currentScr->alert != NULL)
-    {
-        currentScr->alert->syncFromGlobal();
-    }
-
-    screenLoop(); // run one screen loop of the new screen to update things like the alert before it gets shown on screen
+    syncAlertState();
 }
 
 void safetyModeMsgBoxCheck()
@@ -120,8 +443,6 @@ void safetyModeMsgBoxCheck()
     {
         hasShownSafetyMode = true;
         // show safety mode dialog
-        static char buf[40];
-        snprintf(buf, sizeof(buf), "Save current height to preset %i?", currentPreset);
         currentScr->showMsgBox("Safe Boot is ENABLED!", "Safe boot is enabled meaning some features are disabled (your compressor & rise on start). Please check your settings are correct and then disable safe boot. This includes 'Pressure Sensor Rating PSI'. Then double check system functionality before disabling safety mode.", "View Settings", "Disable Anyway", []() -> void
                                { 
                                     changeScreen(SCREEN_SETTINGS); 
@@ -136,18 +457,11 @@ void safetyModeMsgBoxCheck()
 
 void screenLoop()
 {
-    switch (currentScreen)
-    {
-    case SCREEN_HOME:
-        scrHome.loop();
-        break;
-    case SCREEN_PRESETS:
-        scrPresets.loop();
-        break;
-    case SCREEN_SETTINGS:
-        scrSettings.loop();
-        break;
+    if (currentScreen != SCREEN_NONE) {
+        uint32_t idx = screenToTabIndex(currentScreen);
+        if (idx < NUM_TABS && g_tabs[idx]) {
+            g_tabs[idx]->loop();
+        }
     }
-
     resetTouchInputFrame();
 }

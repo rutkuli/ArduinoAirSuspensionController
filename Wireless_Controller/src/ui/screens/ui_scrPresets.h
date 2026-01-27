@@ -36,6 +36,4 @@ public:
     void updateButtonStyles();
 };
 
-extern ScrPresets scrPresets;
-
 #endif

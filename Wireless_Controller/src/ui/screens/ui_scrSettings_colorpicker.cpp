@@ -1,5 +1,6 @@
 #include "ui_scrSettings.h"
 #include "../../utils/util.h"
+#include "ui/ui.h"
 
 // Forward declaration
 extern void reinitializeScreens();
@@ -255,8 +256,9 @@ void ScrSettings::showColorPickerModal() {
             setthemeColorDark(((r / 2) << 16) | ((g / 2) << 8) | (b / 2));
             setthemeColorMedium(((r * 3 / 4) << 16) | ((g * 3 / 4) << 8) | (b * 3 / 4));
 
-            if (scrSettings.ui_themePreset) {
-                scrSettings.ui_themePreset->setSelectedOption(-1, false);
+            ScrSettings *scr = (ScrSettings*)g_tabs[2];
+            if (scr->ui_themePreset) {
+                scr->ui_themePreset->setSelectedOption(-1, false);
             }
 
             lv_obj_delete(data->overlay);

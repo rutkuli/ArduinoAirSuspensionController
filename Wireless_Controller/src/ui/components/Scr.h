@@ -3,8 +3,6 @@
 
 #include <Arduino.h>
 #include "lvgl.h"
-#include "../ui_helpers.h"
-#include "../ui_events.h"
 
 #include "utils/util.h"
 #include "utils/touch_lib.h"
@@ -31,6 +29,11 @@ class Scr
 private:
     void createModernNavbar();
 public:
+    struct NavbarCallbackData {
+        NavbarItem item;
+        Scr *scr;
+    };
+
     bool showPressures;
     bool showAlertIcon;  // Whether to show alert icon on this screen
     NavbarItem activeNavItem;  // Which navbar item is active for this screen
@@ -41,6 +44,7 @@ public:
     lv_obj_t *navbar_icons[3];
     lv_obj_t *navbar_labels[3];
     lv_obj_t *navbar_indicator;
+    NavbarCallbackData navbar_cb_data[3];
     Alert *alert;
     lv_obj_t *ui_lblPressureFrontDriver;
     lv_obj_t *ui_lblPressureRearDriver;

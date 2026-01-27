@@ -6,12 +6,6 @@
 #include "Scr.h"
 #include "ui/ui.h" // sketchy backwards import may break in the future
 
-// Structure for navbar callback data
-struct NavbarCallbackData {
-    NavbarItem item;
-    Scr *scr;
-};
-
 Scr::Scr(bool showPressures, bool showAlertIcon, NavbarItem activeNav)
 {
     this->showPressures = showPressures;
@@ -23,13 +17,20 @@ Scr::Scr(bool showPressures, bool showAlertIcon, NavbarItem activeNav)
         this->navbar_btns[i] = NULL;
         this->navbar_icons[i] = NULL;
         this->navbar_labels[i] = NULL;
+        this->navbar_cb_data[i].item = (NavbarItem)i;
+        this->navbar_cb_data[i].scr = this;
     }
 }
 
 void Scr::init()
 {
-    this->scr = lv_obj_create(NULL);
-    lv_obj_remove_flag(this->scr, LV_OBJ_FLAG_SCROLLABLE); /// Flags
+    // Assume we're always in a tabview - scr is pre-set to a tab page container
+    // Ensure we start from a clean slate (no padding/scroll styles from the tabview)
+    lv_obj_remove_style_all(this->scr);
+    lv_obj_set_style_pad_all(this->scr, 0, 0);
+    // Tab pages account for global navbar height
+    lv_obj_set_size(this->scr, getScreenWidth(), getScreenHeight() - getNavbarHeight());
+    lv_obj_remove_flag(this->scr, LV_OBJ_FLAG_SCROLLABLE);
 
     this->mb_dialog = NULL;
     this->deleteMessageBoxNextFrame = false;
@@ -41,8 +42,9 @@ void Scr::init()
     this->prevUnitsMode = -1;
 
     // Subtle theme-tinted gradient background
+    // Account for global navbar height (always in tabview)
     const int screenWidth = getScreenWidth();
-    const int screenHeight = getScreenHeight();
+    const int screenHeight = getScreenHeight() - getNavbarHeight();
     this->rect_bg = lv_obj_create(this->scr);
     lv_obj_remove_style_all(this->rect_bg);
     lv_obj_set_size(this->rect_bg, screenWidth, screenHeight);
@@ -55,8 +57,7 @@ void Scr::init()
     lv_obj_set_style_bg_grad_stop(this->rect_bg, 180, LV_PART_MAIN);
     lv_obj_remove_flag(this->rect_bg, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
 
-    // Modern navbar
-    createModernNavbar();
+    // Navbar is handled globally in ui.cpp (not per-screen)
 
     this->alert = new Alert(this, this->showAlertIcon);
 
@@ -95,7 +96,7 @@ static void navbar_click_cb(lv_event_t *e)
 {
     lv_event_code_t event_code = lv_event_get_code(e);
     if (event_code == LV_EVENT_CLICKED) {
-        NavbarCallbackData *cbData = (NavbarCallbackData *)lv_event_get_user_data(e);
+        Scr::NavbarCallbackData *cbData = (Scr::NavbarCallbackData *)lv_event_get_user_data(e);
         
         if (!cbData || !cbData->scr) return;
         
@@ -344,10 +345,9 @@ void Scr::createModernNavbar()
         lv_obj_set_style_pad_row(this->navbar_btns[i], 4, 0);
         
         // Add click event callback - pass both item and screen pointer
-        static NavbarCallbackData cbData[3];  // Static to persist
-        cbData[i].item = (NavbarItem)i;
-        cbData[i].scr = this;
-        lv_obj_add_event_cb(this->navbar_btns[i], navbar_click_cb, LV_EVENT_CLICKED, &cbData[i]);
+        this->navbar_cb_data[i].item = (NavbarItem)i;
+        this->navbar_cb_data[i].scr = this;
+        lv_obj_add_event_cb(this->navbar_btns[i], navbar_click_cb, LV_EVENT_CLICKED, &this->navbar_cb_data[i]);
 
         // Icon - make non-clickable so touches pass through to parent button
         this->navbar_icons[i] = lv_label_create(this->navbar_btns[i]);

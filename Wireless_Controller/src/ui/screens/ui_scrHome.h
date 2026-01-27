@@ -24,6 +24,4 @@ public:
     lv_obj_t *pillRearPassenger;
 };
 
-extern ScrHome scrHome;
-
 #endif

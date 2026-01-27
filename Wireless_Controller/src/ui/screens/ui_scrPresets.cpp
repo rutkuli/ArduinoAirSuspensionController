@@ -1,6 +1,5 @@
 #include "ui_scrPresets.h"
-
-ScrPresets scrPresets(true, true, NAV_PRESETS);
+#include "ui/ui.h"
 
 LV_IMG_DECLARE(img_car);
 LV_IMG_DECLARE(img_wheels);
@@ -68,7 +67,7 @@ static void presetBtnEventCb(lv_event_t *e)
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED) {
         int presetNum = (int)(intptr_t)lv_event_get_user_data(e);
-        scrPresets.setPreset(presetNum);
+        ((ScrPresets*)g_tabs[1])->setPreset(presetNum);
     }
 }
 
@@ -129,9 +128,10 @@ void car_anim_func(lv_obj_t *obj, int32_t y)
 {
 
     lv_obj_set_y(obj, y);
-    lv_obj_set_y(scrPresets.ww1, y + fender1Offset.y);
-    lv_obj_set_y(scrPresets.ww2, y + fender2Offset.y);
-    // lv_obj_move_foreground(scrPresets.wheels);
+    ScrPresets *scr = (ScrPresets*)g_tabs[1];
+    lv_obj_set_y(scr->ww1, y + fender1Offset.y);
+    lv_obj_set_y(scr->ww2, y + fender2Offset.y);
+    // lv_obj_move_foreground(scr->wheels);
 }
 
 void animCarPreset(ScrPresets *scr, lv_coord_t end)
@@ -283,7 +283,7 @@ void ScrPresets::init()
         if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
             static char buf[40];
             snprintf(buf, sizeof(buf), "Save current height to preset %i?", currentPreset);
-            scrPresets.showMsgBox(buf, NULL, "Confirm", "Cancel", []() {
+            ((ScrPresets*)g_tabs[1])->showMsgBox(buf, NULL, "Confirm", "Cancel", []() {
                 Serial.println("save preset");
                 SaveCurrentPressuresToProfilePacket pkt(currentPreset - 1);
                 sendRestPacket(&pkt);
@@ -302,7 +302,7 @@ void ScrPresets::init()
     lv_obj_add_event_cb(this->btnLoad, [](lv_event_t *e) {
         if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
             if (currentPreset == 1) {
-                scrPresets.showMsgBox("Air out?", "Preset 1 is typically air out. Please verify your car is not moving.", "Confirm", "Cancel", []() {
+                ((ScrPresets*)g_tabs[1])->showMsgBox("Air out?", "Preset 1 is typically air out. Please verify your car is not moving.", "Confirm", "Cancel", []() {
                     loadSelectedPreset();
                 }, []() {}, false);
             } else {
@@ -312,7 +312,7 @@ void ScrPresets::init()
     }, LV_EVENT_CLICKED, NULL);
 
     // Bring overlays to foreground
-    if (this->navbar_container) lv_obj_move_foreground(this->navbar_container);
+    // Note: navbar is handled globally in ui.cpp, no need to move it here
     lv_obj_move_foreground(this->ui_lblPressureFrontPassenger);
     lv_obj_move_foreground(this->ui_lblPressureRearPassenger);
     lv_obj_move_foreground(this->ui_lblPressureFrontDriver);

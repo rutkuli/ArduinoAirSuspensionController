@@ -1,8 +1,6 @@
 #include "ui_scrHome.h"
 #include "ui/ui.h" // sketchy backwards import may break in the future
 
-ScrHome scrHome(true, true, NAV_HOME);
-
 // Unified pill button dimensions - calculated dynamically for rotation support
 static int PILL_WIDTH = 60;
 static int PILL_HEIGHT = 100;
@@ -325,7 +323,7 @@ void ScrHome::init(void)
     setupPillButtonCallbacks(pillRearPassenger, rearPassengerUp, 1, rearPassengerDown, 1);
 
     // Bring overlays to foreground
-    if (this->navbar_container) lv_obj_move_foreground(this->navbar_container);
+    // Note: navbar is handled globally in ui.cpp, no need to move it here
     lv_obj_move_foreground(this->ui_lblPressureFrontPassenger);
     lv_obj_move_foreground(this->ui_lblPressureRearPassenger);
     lv_obj_move_foreground(this->ui_lblPressureFrontDriver);

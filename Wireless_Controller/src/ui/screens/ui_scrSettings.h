@@ -69,7 +69,6 @@ public:
     void showColorPickerModal();
 };
 
-extern ScrSettings scrSettings;
 extern std::vector<ble_addr_t> authblacklist;
 
 #endif

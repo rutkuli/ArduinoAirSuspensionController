@@ -9,8 +9,6 @@
 #include "Arduino.h"
 #include "lvgl.h"
 
-#include "ui_helpers.h"
-#include "ui_events.h"
 
 #include "screens/ui_scrHome.h"
 #include "screens/ui_scrPresets.h"
@@ -33,5 +31,6 @@ void screenLoop();
 void safetyModeMsgBoxCheck();
 
 extern SCREEN currentScreen;
+extern Scr *g_tabs[3]; // Screen objects: 0=Home, 1=Presets, 2=Settings
 
 #endif

@@ -1,6 +1,5 @@
 #include "ui_scrSettings.h"
-
-ScrSettings scrSettings(false, false, NAV_SETTINGS);  // No pressures, no alert icon
+#include "ui/ui.h"
 
 void alertValueUpdated()
 {
@@ -548,7 +547,7 @@ void ScrSettings::init()
 
     // Custom color picker button
     allOptions.push_back(new Option(screen_settings_page, OptionType::BUTTON, "Custom Color Picker", {.STRING = ""}, [](void *data) {
-        scrSettings.showColorPickerModal();
+        ((ScrSettings*)g_tabs[2])->showColorPickerModal();
     }));
 
     // --- Config page ---
@@ -740,6 +739,7 @@ void ScrSettings::init()
     }
 
     sendConfigValuesPacket(false);
+    log_i("Settings screen initialized");
 }
 
 
@@ -813,7 +813,7 @@ void ScrSettings::cleanup()
 {
     // Call base class cleanup first (deletes Alert)
     Scr::cleanup();
-
+    log_i("Cleaning up Settings screen");
     // Delete stored Option/RadioOption members
     delete ui_s1;
     delete ui_s2;
